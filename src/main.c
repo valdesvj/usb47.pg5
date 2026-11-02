@@ -35,7 +35,7 @@ static const Reg REGS[] = {
 #endif
 
 static uint32_t A[NREG], B[NREG];             /* before and after usb_acm_on */
-static int haveA, haveB, nread, acm;
+static int haveA, haveB, nread, acm, watch;
 static char msg[64];
 
 static void row(int i, int y, const uint32_t *v, int have, const uint32_t *ref) {
@@ -103,6 +103,7 @@ void program_main(void) {
   draw();
   for (;;) {
     if ((ST(STAT_PGM_END) && ST(STAT_SUSPENDED)) || (!ST(STAT_PGM_END) && key_empty())) {
+      if (acm) sys_timer_start(0, 1000);        /* after ACM ON: read again every second, the firmware running between */
       CLR_ST(STAT_RUNNING);
       sys_sleep();
     }
@@ -121,7 +122,14 @@ void program_main(void) {
     if (ST(STAT_OFF)) { LCD_power_on(); rtc_wakeup_delay(); CLR_ST(STAT_OFF); draw(); }
     if (ST(STAT_POWER_CHANGE)) { switch_usb_powered_freq(); CLR_ST(STAT_POWER_CHANGE); }
     int k = key_pop();
-    if (k <= 0) continue;
+    if (k <= 0) {
+      if (acm && key_empty()) {
+        read_all(B, &haveB);
+        snprintf(msg, sizeof msg, "watching %d s: DCTL bit 1 = 0 is connected", ++watch);
+        draw();
+      }
+      continue;
+    }
     switch (k) {
     case KEY_F1: if (acm) read_all(B, &haveB); else read_all(A, &haveA); break;
     case KEY_F2:
@@ -130,6 +138,7 @@ void program_main(void) {
       usb_acm_on();
       sys_delay(500);
       acm = 1;
+      watch = 0;
       read_all(B, &haveB);
       acm_puts("USB47 hello\r\n");
       snprintf(msg, sizeof msg, "acm on: inverted = changed. dmesg?");
