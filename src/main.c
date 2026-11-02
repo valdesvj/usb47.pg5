@@ -1,5 +1,5 @@
 /*
- * USB47 step 1: the USB register probe for the SwissMicros DM42n (DMCP5, STM32U575).
+ * USB47 step 1: the USB register probe; step 2 (SERIAL): our own USB serial port with TinyUSB, an echo test for the SwissMicros DM42n (DMCP5, STM32U575).
  * Reads the chip's USB registers to find out whether a .pg5 can reach the USB hardware (or whether TrustZone keeps it
  * for the firmware), and what DMCP's usb_acm_on() changes. It only reads registers; the firmware calls are the SDK's
  * own (usb_acm_on, usb_turn_off). The screen keeps its picture if a read faults: the last "reading ..." line shows
@@ -11,6 +11,7 @@
 #include <stdio.h>
 #include <string.h>
 #include "ntext.h"
+#include "usbser.h"
 
 #define OTG 0x42040000u                       /* USB OTG_FS, non-secure alias (RM0456) */
 typedef struct { const char *name; uint32_t addr; } Reg;
@@ -36,6 +37,11 @@ static const Reg REGS[] = {
 
 static uint32_t A[NREG], B[NREG];             /* before and after usb_acm_on */
 static int haveA, haveB, nread, acm, watch;
+static int ser;                               /* step 2: our own USB serial port (TinyUSB) */
+static char rx[8][52];                        /* the last lines the PC sent */
+static int nrx, sent_n;
+static char rxline[52];
+static int rxlen;
 static char msg[64];
 
 static void row(int i, int y, const uint32_t *v, int have, const uint32_t *ref) {
@@ -46,8 +52,32 @@ static void row(int i, int y, const uint32_t *v, int have, const uint32_t *ref) 
   if (ref && have > i && v[i] != ref[i]) nt_inv(x, y, s); else nt(x, y, s);
 }
 
+static void draw_ser(void) {
+  char s[64];
+  nt_inv(2, 0, "USB47 step 2: own USB serial (TinyUSB)");
+  lcd_fill_rect(0, 15, LCD_X, 1, 1);
+  sprintf(s, "port %s   PC %s   PC has it open %s", usbser_active() ? "ON" : "off", usbser_mounted() ? "sees it" : "-",
+          usbser_connected() ? "YES" : "no");
+  nt(2, 20, s);
+  sprintf(s, "DCTL %08lX  GINTSTS %08lX", (unsigned long)RD(0x42040804u), (unsigned long)RD(0x42040014u));
+  nt(2, 38, s);
+  sprintf(s, "sent %d lines. Linux: cat /dev/ttyACM0", sent_n);
+  nt(2, 56, s);
+  nt(2, 76, "received (echoed back):");
+  for (int i = 0; i < 7; i++) nt(10, 92 + NT_ROW * i, rx[i]);
+}
+
 static void draw(void) {
   lcd_clear_buf();
+  if (ser) {
+    draw_ser();
+    nt(2, 192, msg);
+    static const char *k2[6] = { "", "", "", "", "SERIAL", "EXIT" };
+    lcd_draw_menu_keys(k2);
+    lcd_refresh();
+    lcd_refresh_wait();
+    return;
+  }
   nt_inv(2, 0, "USB47 step 1: USB registers");
   nt(230, 0, acm ? "after usb_acm_on" : "now");
   lcd_fill_rect(0, 15, LCD_X, 1, 1);
@@ -55,7 +85,7 @@ static void draw(void) {
   int have = acm ? (haveB ? NREG : nread) : (haveA ? NREG : nread);
   for (int i = 0; i < NREG; i++) row(i, 17 + NT_ROW * (i / 2), v, have, acm && haveA ? A : NULL);
   nt(2, 192, msg);
-  static const char *keys[6] = { "READ", "ACM ON", "ACM OF", "SAVE", "", "EXIT" };
+  static const char *keys[6] = { "READ", "ACM ON", "ACM OF", "SAVE", "SERIAL", "EXIT" };
   lcd_draw_menu_keys(keys);
   lcd_refresh();
   lcd_refresh_wait();
@@ -93,6 +123,45 @@ static void save(void) {
   sys_disk_write_enable(0);
 }
 
+static void ser_toggle(void) {
+  if (ser) { usbser_stop(); ser = 0; strcpy(msg, "own serial port off"); return; }
+  int r = usbser_start("USB47 test");
+  if (r == -1) { strcpy(msg, "no USB power: connect the cable"); return; }
+  if (r == -2) { strcpy(msg, "no memory"); return; }
+  ser = 1;
+  nrx = 0; sent_n = 0; rxlen = 0;
+  memset(rx, 0, sizeof rx);
+  strcpy(msg, "on: dmesg should show cdc_acm");
+}
+
+static void ser_poll(void) {                     /* echo what the PC sends; a line a second to the PC */
+  static uint32_t last;
+  uint8_t b[64];
+  int n = usbser_read(b, sizeof b);
+  for (int i = 0; i < n; i++) {
+    char c = (char)b[i];
+    if (c == '\r' || c == '\n' || rxlen >= 50) {
+      if (rxlen) {
+        rxline[rxlen] = 0;
+        memmove(rx[0], rx[1], sizeof rx[0] * 6);
+        strcpy(rx[6], rxline);
+        nrx++;
+        usbser_puts("echo: "); usbser_puts(rxline); usbser_puts("\r\n");
+        rxlen = 0;
+      }
+    } else if (c >= 32 && c < 127) rxline[rxlen++] = c;
+  }
+  if (sys_current_ms() - last >= 1000) {
+    last = sys_current_ms();
+    if (usbser_connected()) {
+      char t[48];
+      sprintf(t, "USB47 hello %d\r\n", sent_n + 1);
+      if (usbser_puts(t) > 0) sent_n++;
+    }
+    draw();
+  } else if (n) draw();
+}
+
 void _exit(int code) { (void)code; sys_reset(); for (;;) {} }
 
 void program_main(void) {
@@ -102,7 +171,11 @@ void program_main(void) {
   read_all(A, &haveA);
   draw();
   for (;;) {
-    if ((ST(STAT_PGM_END) && ST(STAT_SUSPENDED)) || (!ST(STAT_PGM_END) && key_empty())) {
+    if (ser && !ST(STAT_PGM_END)) {              /* the USB runs: no sleep (it would stop the USB) */
+      usbser_idle(50);
+      ser_poll();
+      if (key_empty()) continue;
+    } else if ((ST(STAT_PGM_END) && ST(STAT_SUSPENDED)) || (!ST(STAT_PGM_END) && key_empty())) {
       if (acm) sys_timer_start(0, 1000);        /* after ACM ON: read again every second, the firmware running between */
       CLR_ST(STAT_RUNNING);
       sys_sleep();
@@ -123,7 +196,7 @@ void program_main(void) {
     if (ST(STAT_POWER_CHANGE)) { switch_usb_powered_freq(); CLR_ST(STAT_POWER_CHANGE); }
     int k = key_pop();
     if (k <= 0) {
-      if (acm && key_empty()) {
+      if (acm && !ser && key_empty()) {
         read_all(B, &haveB);
         snprintf(msg, sizeof msg, "watching %d s: DCTL bit 1 = 0 is connected", ++watch);
         draw();
@@ -131,8 +204,10 @@ void program_main(void) {
       continue;
     }
     switch (k) {
-    case KEY_F1: if (acm) read_all(B, &haveB); else read_all(A, &haveA); break;
+    case KEY_F1: if (ser) break; if (acm) read_all(B, &haveB); else read_all(A, &haveA); break;
+    case KEY_F5: ser_toggle(); break;
     case KEY_F2:
+      if (ser || usb_is_on()) { strcpy(msg, "already on (twice crashes the firmware)"); break; }
       strcpy(msg, "usb_acm_on() ...");
       draw();
       usb_acm_on();
@@ -143,9 +218,9 @@ void program_main(void) {
       acm_puts("USB47 hello\r\n");
       snprintf(msg, sizeof msg, "acm on: inverted = changed. dmesg?");
       break;
-    case KEY_F3: usb_turn_off(); sys_delay(200); acm = 0; read_all(A, &haveA); strcpy(msg, "usb_turn_off()"); break;
-    case KEY_F4: save(); break;
-    case KEY_EXIT: case KEY_F6: SET_ST(STAT_PGM_END); break;
+    case KEY_F3: if (ser) break; usb_turn_off(); sys_delay(200); acm = 0; read_all(A, &haveA); strcpy(msg, "usb_turn_off()"); break;
+    case KEY_F4: if (!ser) save(); break;
+    case KEY_EXIT: case KEY_F6: if (ser) { usbser_stop(); ser = 0; } SET_ST(STAT_PGM_END); break;
     }
     draw();
   }

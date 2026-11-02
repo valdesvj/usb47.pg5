@@ -3,7 +3,7 @@
 A small DMCP5 test program (`USB47.pg5`) for the SwissMicros DM42n (STM32U575). The goal: USB **in and out** from a
 .pg5 (a CDC serial port with a receive function, which the DMCP SDK lacks: it has only `usb_acm_on` and `acm_puts`).
 
-**Step 1 (this version): the register probe.** It only reads: the core (CPUID, VTOR, SAU), the OTG_FS interrupt
+**Step 2 (SERIAL, F5): our own USB serial port with TinyUSB**: `/dev/ttyACM0` appears; it sends `USB47 hello N` every second and echoes what Linux sends (shown on screen). **Step 1: the register probe.** It only reads: the core (CPUID, VTOR, SAU), the OTG_FS interrupt
 vector, FLASH OPTR (TrustZone), RCC and PWR (the USB clock and supply), and the USB OTG_FS core registers. Each read
 is shown before it is made, so if one faults (TrustZone keeping USB for the firmware) the screen still shows which.
 

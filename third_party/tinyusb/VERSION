@@ -1,0 +1,1 @@
+TinyUSB 0.21.0 (https://github.com/hathach/tinyusb), MIT: only the device stack, CDC and the DWC2 (STM32) driver.
