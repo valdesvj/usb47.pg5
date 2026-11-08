@@ -246,6 +246,10 @@ class Test:
         for op, n, apps in ((0x10, 'SEND_PRINTF', ('-', '-')), (0x11, 'SEND_LCD', ('yes', 'yes')),
                             (0x12, 'SEND_KEYS', ('-', '-')), (0x13, 'SEND_IR', ('-', '-'))):
             was = self.io(op)
+            if op == 0x13 and was == INVALID:          # the IR printer path: needs SwissMicros' IR port repeater
+                self.rec('I13', 'SERIO_SEND_IR read / write', 'DOC', 'SKIP',
+                         'not tested: needs the IR port repeater (here the read gives SER_IOCTL_INVALID)')
+                continue
             a, ra = self.io(op, 1), self.io(op)
             b, rb = self.io(op, 0), self.io(op)
             self.io(op, was if was in (0, 1) else 0)
