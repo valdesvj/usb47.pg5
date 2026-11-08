@@ -59,7 +59,7 @@ static uint8_t inb[USIN_CHAN_SIZE + 2];
 static char big[BIGSZ];
 static int bufsz = USIN_CHAN_SIZE, verbose, no77, pattern, dirty = 1;
 static uint32_t hold_until, nowake_until, sleep_t0;
-static int conn = -1, act = -1, hold_ch = 2;
+static int conn = -1, act = -1, hold_ch = 2, hold_ready = -1;
 static unsigned n_in, n_out, n77, nkeys;
 static char last_result[CAP], cur[48] = "waiting for tools/sertest.py";
 
@@ -304,7 +304,7 @@ static void command(int ch, char *s) {
   } else if (!strcmp(s, "ECHO")) say(ch, "ECHO %s", arg);
   else if (!strcmp(s, "BUF")) { bufsz = a < 1 ? 1 : a > USIN_CHAN_SIZE ? USIN_CHAN_SIZE : (int)a; say(ch, "BUF %d", bufsz); }
   else if (!strcmp(s, "VERBOSE")) { verbose = (int)a; say(ch, "VERBOSE %d", verbose); }
-  else if (!strcmp(s, "HOLD")) { hold_until = now() + (uint32_t)a; hold_ch = ch; say(ch, "HOLD %ld", a); logline("HOLD %ld", a); }
+  else if (!strcmp(s, "HOLD")) { hold_until = now() + (uint32_t)a; hold_ch = ch; hold_ready = -1; say(ch, "HOLD %ld", a); logline("HOLD %ld", a); }
   else if (!strcmp(s, "BURST")) burst(ch, (int)a, (int)b, (int)c);
   else if (!strcmp(s, "BIG")) {
     int n = a < 2 ? 2 : a > BIGSZ ? BIGSZ : (int)a;
@@ -354,7 +354,11 @@ static void command(int ch, char *s) {
 /* the PC's lines, channels 2 and 3 (the only input channels a program can read) */
 static void poll_lines(void) {
   if (hold_until) {
-    if ((int32_t)(now() - hold_until) < 0) return;
+    if ((int32_t)(now() - hold_until) < 0) {          /* not reading: log what waits, as it changes */
+      int r = usb_serial_ioctl(SERIO_LINE_READY, 2);
+      if (r != hold_ready) { hold_ready = r; logline("HOLDING ready2=%d connected=%d", r, io(SERIO_IS_CONNECTED)); }
+      return;
+    }
     hold_until = 0;
     say(hold_ch, "HOLDEND ready2=%d len2=%d ready3=%d len3=%d", usb_serial_ioctl(SERIO_LINE_READY, 2),
         usb_serial_ioctl(SERIO_LINE_LENGTH, 2), usb_serial_ioctl(SERIO_LINE_READY, 3),

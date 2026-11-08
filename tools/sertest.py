@@ -542,10 +542,10 @@ class Test:
 
     def new_host(self):
         self.log('== a new host: DTR and the lines waiting (section 7)')
-        self.cmd('HOLD 3000', expect='HOLD')
+        self.cmd('HOLD 4000', expect='HOLD')
         for i in range(3):
             self.p.send(2, 'PING STALE%d' % i)
-        time.sleep(0.2)
+        time.sleep(0.6)                                 # the lines are in SERTEST's FIFO (it logs LINE_READY)
         self.p.close()
         time.sleep(1.0)
         self.p.open()
@@ -554,9 +554,17 @@ class Test:
         self.p.reply(2, 'HOLDEND', 5, since)
         self.p.collect(1.0)
         got = [l.text for l in self.p.lines[since:] if l.text.startswith('PONG STALE')]
+        self.report(quiet=True)
+        part = self.calclog[self.calclog.rfind(' HOLD 4000'):]
+        seen = re.findall(r'HOLDING ready2=(-?\d+) connected=(-?\d+)', part)
+        st = re.findall(r'STATE active \S+ connected (\S+) ready2=(-?\d+)', part)
+        before = max([int(r) for r, c in seen if c == '1'] or [0])
         self.rec('T4', 'lines sent before a reconnect are still in the FIFO', 'DOC',
-                 'PASS' if len(got) == 3 else 'FAIL', '%s; answered after the reconnect: %d of 3' % (
-                     hello.text if hello else 'no HELLO', len(got)), ('-', 'yes'))
+                 'PASS' if len(got) == 3 else 'FAIL',
+                 'LINE_READY while the port was open: %d; at the close / reopen: %s; answered after the reconnect: %d '
+                 'of 3%s' % (before, ', '.join('%s ready2=%s' % x for x in st) or '-', len(got),
+                             ' (the lines were there, then gone: DMCP emptied the FIFO)' if before and not got else ''),
+                 ('-', 'yes'))
 
     def floods(self):
         self.log('== a host that does not read (section 6, UNKNOWN 2)')
