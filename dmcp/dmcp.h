@@ -361,7 +361,9 @@ typedef struct {
 
 // System interface version
 #define PLATFORM_IFC_CNR   3
+#ifndef PLATFORM_IFC_VER               /* SERTEST builds with 18 (DMCP5 3.58's serial console) */
 #define PLATFORM_IFC_VER  17
+#endif
 
 // STATIC_ASSERT ...
 #define ASSERT_CONCAT_(a, b) a##b

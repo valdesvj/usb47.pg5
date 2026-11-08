@@ -2,3 +2,5 @@ build/
 .dep/
 *.o
 simdisk/
+sertest_*.log
+sertest_*_wire.txt
