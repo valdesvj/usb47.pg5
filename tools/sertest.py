@@ -6,6 +6,8 @@ the DM42n, with the calculator program SERTEST.pg5 (make sertest), and write a l
   2. On the PC (Linux):  python3 tools/sertest.py /dev/ttyACM0            (about 3 minutes, no input needed)
                          python3 tools/sertest.py /dev/ttyACM0 --manual   (+ a real key, the cable, DMCP's menu)
   3. Send sertest_<date>.log (and sertest_<date>_wire.txt: every line on the wire, with times).
+  To end SERTEST: the test does it at the end (QUIT); Ctrl+C here sends QUIT too; python3 tools/sertest.py --quit
+  ends it any time; on the calculator EXIT or F6. No reset: the calculator goes off, ON gives DMCP's menu.
 
 Every item gets PASS (as the sheet says), FAIL (not as the sheet says: the detail says what came instead), MEASURED
 (a value or behaviour the sheet leaves open: the two UNKNOWNs) or INFO, and the columns NAV47 / CHESS47 say which of
@@ -672,12 +674,27 @@ class Test:
         self.log('             LCD stream: ' + next((r[4] for r in self.res if r[0] == 'WR4b'), 'not run'))
 
 
+def quit_only(path):
+    """--quit: end SERTEST from the PC (QUIT: your DMCP settings back, /SERTEST.TXT saved, the program ends)."""
+    with open(os.devnull, 'w') as null:
+        p = Port(path, null)
+        p.open(wait=5)
+        since = p.mark()
+        p.send(2, 'QUIT')
+        q = p.reply(2, 'QUIT', 3, since)
+        print(q.text if q else 'no answer: is SERTEST running? (EXIT or F6 on the calculator ends it too)')
+        p.collect(1.0)
+
+
 def main():
     ap = argparse.ArgumentParser(description='DMCP5 3.58 serial console: test every item of the data sheet')
     ap.add_argument('port', nargs='?', default='/dev/ttyACM0')
     ap.add_argument('--manual', action='store_true', help='also a real key, unplugging the cable, DMCP\'s menu')
     ap.add_argument('--out', default='.', help='where the logs go')
+    ap.add_argument('--quit', action='store_true', help='only end SERTEST on the calculator (QUIT), no test')
     a = ap.parse_args()
+    if a.quit:
+        return quit_only(a.port)
     stamp = datetime.datetime.now().strftime('%Y%m%d_%H%M')
     lp = os.path.join(a.out, 'sertest_%s.log' % stamp)
     wp = os.path.join(a.out, 'sertest_%s_wire.txt' % stamp)
@@ -704,6 +721,13 @@ def main():
             t.finish()
         except (KeyboardInterrupt, OSError) as e:
             t.log('stopped: %r' % e)
+            if port.fd is not None:                    # end SERTEST too: its settings back, no reset needed
+                try:
+                    port.send(2, 'QUIT')
+                    port.collect(1.0)
+                    t.log('sent QUIT: SERTEST put your DMCP settings back and ended')
+                except OSError:
+                    pass
         t.summary(started)
         t.log('')
         t.log('log: %s   every line on the wire: %s' % (lp, wp))

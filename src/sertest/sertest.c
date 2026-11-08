@@ -25,7 +25,9 @@
  *   RESULT              the last result again (it may have been sent while the PC was not there)
  *   REPORT, CLEARLOG    the calculator's own log (boot readings, keys, connects, wakes)
  *   QUIT                put the user's settings back, read them again, save /SERTEST.TXT, end
- * Keys on the calculator: F4 saves /SERTEST.TXT, EXIT puts the settings back and ends; every key is logged.
+ * Keys on the calculator: F4 saves /SERTEST.TXT, EXIT or F6 puts the settings back and ends; every key is logged.
+ * From the PC: tools/sertest.py --quit (the command QUIT) ends it the same way. No reset needed: the calculator
+ * goes off; ON brings back DMCP's menu.
  * Copyright (C) 2026 Victor Valdes - GPL-3.0-or-later.
  */
 #include <main.h>
@@ -143,7 +145,7 @@ static void draw(void) {
   sprintf(s, "log %d lines, %d bytes", loglines, logn);
   nt(2, 122, s);
   nt(2, 146, "PC: python3 tools/sertest.py /dev/ttyACM0");
-  nt(2, 162, "F4 saves /SERTEST.TXT   EXIT ends");
+  nt(2, 162, "F4 saves /SERTEST.TXT   EXIT or F6 ends");
   static const char *keys[6] = { "", "", "", "SAVE", "", "EXIT" };
   lcd_draw_menu_keys(keys);
   lcd_refresh();
@@ -473,7 +475,7 @@ void program_main(void) {
       continue;
     }
     if (k == KEY_F4) save();
-    if (k == KEY_EXIT) {
+    if (k == KEY_EXIT || k == KEY_F6) {               /* EXIT or F6: the settings back, the log saved, the end */
       restore();
       read_all("AFTER EXIT");
       save();
